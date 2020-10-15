@@ -1,0 +1,69 @@
+version: "2.0"
+services:
+  postgres:
+    image: postgres:9.6
+    container_name: postgres
+    volumes:
+      - ${volume_base_path}/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: p@ssw0rd
+    restart: always
+    networks:
+      - app-network
+
+  teamcity:
+    image: ${teamcity_image}:${teamcity_tag}
+    container_name: teamcity
+    volumes:
+      - ${volume_base_path}/teamcity:/data/teamcity_server/datadir
+      - ${volume_base_path}/logs/teamcity:/opt/teamcity/logs
+    environment:
+      TEAMCITY_SERVER_MEM_OPTS: "${teamcity_memory_options}"
+    depends_on:
+      - postgres
+    ports:
+      - "${teamcity_port}:8111"
+    restart: always
+    logging:
+      options:
+        max-size: "1Gb"
+        max-file: "3"
+    networks:
+      - app-network
+
+  webserver:
+    image: nginx:mainline-alpine
+    container_name: webserver
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${volume_base_path}/web-root:/usr/share/nginx/html
+      - ${volume_base_path}/webserver/webserver-conf:/etc/nginx/conf.d/teamcity.conf
+      - ${volume_base_path}/certbot-etc:/etc/letsencrypt
+      - ${volume_base_path}/certbot-var:/var/lib/letsencrypt
+      - ${volume_base_path}/logs/webserver:/var/log/nginx
+      - ${volume_base_path}/webserver/dhparam:/etc/ssl/certs
+      - ${volume_base_path}/certbot-data:/data/letsencrypt
+    depends_on:
+      - teamcity
+    networks:
+      - app-network
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ${volume_base_path}/certbot-etc:/etc/letsencrypt
+      - ${volume_base_path}/certbot-var:/var/lib/letsencrypt
+      - ${volume_base_path}/certbot-data:/data/letsencrypt
+      - ${volume_base_path}/web-root:/usr/share/nginx/html
+      - ${volume_base_path}/logs/letsencrypt:/var/log/letsencrypt
+    depends_on:
+      - webserver
+    command: certonly --webroot --webroot-path=/usr/share/nginx/html --email admin@coordinative.dev --agree-tos --no-eff-email --force-renewal -d ${external_domain}
+
+networks:
+  app-network:
+    driver: bridge
